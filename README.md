@@ -67,7 +67,8 @@ Set `RIPPLE_E2E_MANUAL=1` if testing without Ollama. Use a new isolated database
 3. Drag **Database → Backend API** and **Backend API → Frontend Application**. For each arrow, save the relationship and request an AI assessment. Read the reasoning and approve the recommendation or enter a manual weight. Changes are saved as you go.
 4. In **Impact Analysis**, create **Database Outage**, select **Database**, set severity to **90**, and add context. Save the trigger and run the analysis.
 5. Expand the direct and indirect results. Follow the stored path and weights. Use **Explain with AI** to discuss uncertainty and potential mitigations.
-6. Open **History** and reopen **Database Outage**. Refresh and open it again to demonstrate persistence.
+6. Open **Scenarios**. Choose the **Database Outage** run as the baseline and create a scenario. Add a mitigation intervention to **Backend API**, run the scenario, and compare it with the baseline. Scenario changes never update live records.
+7. Open **History** and reopen **Database Outage**. Refresh and open it again to demonstrate persistence.
 
 See [CONTINUATION_HANDOFF.md](CONTINUATION_HANDOFF.md) for the current verification checklist and remaining work.
 

@@ -1,4 +1,4 @@
-﻿import { render, screen } from "@testing-library/react";
+﻿import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import App from "./App";
@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   listDependencies: vi.fn(),
   listEvents: vi.fn(),
   listRuns: vi.fn(),
+  listScenarios: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
@@ -37,7 +38,7 @@ function mockOverview() {
   });
 }
 
-test("opens the dashboard with the four product sections and an empty workspace list", async () => {
+test("opens the dashboard with the five product sections and an empty workspace list", async () => {
   api.listWorkspaces.mockResolvedValue([]);
   mockOverview();
   render(<App />);
@@ -47,7 +48,7 @@ test("opens the dashboard with the four product sections and an empty workspace 
     ),
   ).toBeVisible();
   expect(screen.getByRole("navigation")).toHaveTextContent(
-    "DashboardSystem BuilderImpact AnalysisHistory",
+    "DashboardSystem BuilderImpact AnalysisScenariosHistory",
   );
   expect(screen.getByRole("button", { name: "System Builder" })).toBeDisabled();
   expect(
@@ -109,4 +110,48 @@ test("shows request errors and retries the workspace list", async () => {
       "Create a system to start mapping your dependencies.",
     ),
   ).toBeVisible();
+});
+
+test("opens the scenario workspace from the primary navigation", async () => {
+  const user = userEvent.setup();
+  api.listWorkspaces.mockResolvedValue([]);
+  mockOverview();
+  api.saveWorkspace.mockResolvedValue({
+    id: "one",
+    name: "Example",
+    description: "",
+  });
+  for (const method of [
+    api.listEntities,
+    api.listDependencies,
+    api.listEvents,
+    api.listRuns,
+    api.listScenarios,
+  ]) {
+    method.mockResolvedValue({ items: [], total: 0 });
+  }
+  render(<App />);
+  await screen.findByText(
+    "Create a system to start mapping your dependencies.",
+  );
+  await user.click(screen.getByRole("button", { name: "Create Workspace" }));
+  await user.type(screen.getByLabelText("Name"), "Example");
+  await user.click(screen.getByRole("button", { name: "Save workspace" }));
+  await screen.findByRole("button", { name: "Open System Builder" });
+
+  await user.click(
+    within(screen.getByRole("navigation")).getByRole("button", {
+      name: "Scenarios",
+    }),
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "Create a scenario" }),
+  ).toBeVisible();
+  expect(
+    screen.getByText(
+      "Scenario estimates are not predictions or recommendations.",
+    ),
+  ).toBeVisible();
+  expect(api.listScenarios).toHaveBeenCalledTimes(1);
 });
