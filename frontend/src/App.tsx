@@ -1,19 +1,25 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
   MarkerType,
+  Position,
   applyNodeChanges,
+  useNodesInitialized,
+  useReactFlow,
   type Node,
   type NodeChange,
   type Connection,
+  type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import RippleBackground from "./RippleBackground";
 import ScenarioWorkspace from "./ScenarioWorkspace";
 import {
   ApiClient,
+  collectPages,
+  type AIExplanation,
   type AnalysisRun,
   type Dependency,
   type Entity,
@@ -45,20 +51,60 @@ const text = (form: FormData, field: string) =>
 const message = (error: unknown) =>
   error instanceof Error ? error.message : "The request failed.";
 const statusLabel = (status: string) => status.replaceAll("_", " ");
-const initialPosition = (index: number) => ({
-  x: (index % 4) * 230,
-  y: Math.floor(index / 4) * 125,
-});
 
-function entityNode(entity: Entity, index: number): Node {
-  const x = entity.attributes.position_x;
-  const y = entity.attributes.position_y;
+function dependencyLevels(entities: Entity[], dependencies: Dependency[]) {
+  const ids = new Set(entities.map(({ id }) => id));
+  const edges = dependencies.filter(
+    (edge) =>
+      edge.is_active &&
+      ids.has(edge.source_entity_id) &&
+      ids.has(edge.target_entity_id),
+  );
+  const pending = new Map([...ids].map((id) => [id, 0]));
+  for (const edge of edges) {
+    pending.set(edge.target_entity_id, pending.get(edge.target_entity_id)! + 1);
+  }
+  const levels = new Map<string, number>();
+  const queue = [...ids].filter((id) => pending.get(id) === 0);
+  queue.forEach((id) => levels.set(id, 0));
+  for (let index = 0; index < queue.length; index += 1) {
+    const source = queue[index];
+    for (const edge of edges) {
+      if (edge.source_entity_id !== source) continue;
+      const target = edge.target_entity_id;
+      levels.set(
+        target,
+        Math.max(levels.get(target) ?? 0, levels.get(source)! + 1),
+      );
+      pending.set(target, pending.get(target)! - 1);
+      if (pending.get(target) === 0) queue.push(target);
+    }
+  }
+  // Cycle members keep any level reached from acyclic predecessors, otherwise 0.
+  return levels;
+}
+
+function builderNodes(entities: Entity[], dependencies: Dependency[]) {
+  const levels = dependencyLevels(entities, dependencies);
+  const rows = new Map<number, number>();
+  return entities.map((entity) => {
+    const level = levels.get(entity.id) ?? 0;
+    const row = rows.get(level) ?? 0;
+    const { position_x: x, position_y: y } = entity.attributes;
+    if (typeof x === "number" && typeof y === "number") {
+      return entityNode(entity, { x, y });
+    }
+    rows.set(level, row + 1);
+    return entityNode(entity, { x: level * 300, y: row * 150 });
+  });
+}
+
+function entityNode(entity: Entity, position: { x: number; y: number }): Node {
   return {
     id: entity.id,
-    position:
-      typeof x === "number" && typeof y === "number"
-        ? { x, y }
-        : initialPosition(index),
+    position,
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
     data: {
       label: (
         <>
@@ -208,7 +254,6 @@ function WorkspaceView({
     items: ImpactResult[];
     paths: ImpactPath[];
   }>();
-  const [explanation, setExplanation] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -218,17 +263,16 @@ function WorkspaceView({
   ) {
     const [allEntities, allDependencies, allEvents, allRuns] = data;
     const active = allEntities.filter((item) => item.status !== "archived");
-    setEntities(active);
-    setDependencies(
-      allDependencies.filter(
-        (edge) =>
-          active.some((item) => item.id === edge.source_entity_id) &&
-          active.some((item) => item.id === edge.target_entity_id),
-      ),
+    const activeDependencies = allDependencies.filter(
+      (edge) =>
+        active.some((item) => item.id === edge.source_entity_id) &&
+        active.some((item) => item.id === edge.target_entity_id),
     );
+    setEntities(active);
+    setDependencies(activeDependencies);
     setEvents(allEvents.filter((item) => item.status !== "archived"));
     setRuns(allRuns.filter((item) => !item.scenario_id));
-    setNodes(active.map(entityNode));
+    setNodes(builderNodes(active, activeDependencies));
   }
 
   useEffect(() => {
@@ -265,20 +309,24 @@ function WorkspaceView({
   }
 
   async function openRun(run: AnalysisRun) {
-    setExplanation("");
-    const first = await api.listResults(run.id);
-    const items = [...first.items];
-    for (
-      let offset = first.limit;
-      offset < first.total;
-      offset += first.limit
-    ) {
-      items.push(...(await api.listResults(run.id, offset)).items);
-    }
-    const pathPages = await Promise.all(
-      items.map((item) => api.listPaths(run.id, item.entity_id)),
+    setResult(undefined);
+    const items = await collectPages((offset) =>
+      api.listResults(run.id, offset),
     );
-    setResult({ run, items, paths: pathPages.flatMap((page) => page.items) });
+    const paths: ImpactPath[] = [];
+    for (let start = 0; start < items.length; start += 8) {
+      const batch = await Promise.all(
+        items
+          .slice(start, start + 8)
+          .map((item) =>
+            collectPages((offset) =>
+              api.listPaths(run.id, item.entity_id, offset),
+            ),
+          ),
+      );
+      paths.push(...batch.flat());
+    }
+    setResult({ run, items, paths });
   }
 
   function submit(
@@ -605,7 +653,7 @@ function WorkspaceView({
                   </p>
                 ) : (
                   <ReactFlow
-                    key={nodes.length}
+                    key={`${nodes.length}:${activeEdges.length}`}
                     nodes={nodes}
                     edges={activeEdges.map((edge) => ({
                       id: edge.id,
@@ -1247,27 +1295,11 @@ function WorkspaceView({
         )}
         {result && (
           <AnalysisResults
+            key={result.run.id}
             result={result}
             title={runTitle(result.run)}
             workspaceName={current?.name}
-            explanation={explanation}
-            busy={busy}
-            explain={(item) =>
-              void act(async () => {
-                setExplanation("");
-                try {
-                  const answer = await api.explainAnalysis(
-                    result.run.id,
-                    item.entity_id,
-                  );
-                  setExplanation(`${answer.model}\n\n${answer.explanation}`);
-                } catch (error) {
-                  setExplanation(
-                    `AI commentary unavailable. ${message(error)}`,
-                  );
-                }
-              })
-            }
+            api={api}
           />
         )}
       </main>
@@ -1378,12 +1410,12 @@ async function loadData(
   api: ApiClient,
 ): Promise<[Entity[], Dependency[], EventRecord[], AnalysisRun[]]> {
   const [entities, dependencies, events, runs] = await Promise.all([
-    api.listEntities(),
-    api.listDependencies(),
-    api.listEvents(),
-    api.listRuns(),
+    collectPages((offset) => api.listEntities(offset)),
+    collectPages((offset) => api.listDependencies(offset)),
+    collectPages((offset) => api.listEvents(offset)),
+    collectPages((offset) => api.listRuns(undefined, offset)),
   ]);
-  return [entities.items, dependencies.items, events.items, runs.items];
+  return [entities, dependencies, events, runs];
 }
 
 function DependencyAssessment({
@@ -1492,43 +1524,80 @@ function AnalysisResults({
   result,
   title,
   workspaceName,
-  explanation,
-  busy,
-  explain,
+  api,
 }: {
   result: { run: AnalysisRun; items: ImpactResult[]; paths: ImpactPath[] };
   title: string;
   workspaceName?: string;
-  explanation: string;
-  busy: boolean;
-  explain: (item: ImpactResult) => void;
+  api: ApiClient;
 }) {
   const { run, items, paths } = result;
+  const [selectedEntity, setSelectedEntity] = useState<string>();
+  const [expandedEntities, setExpandedEntities] = useState<string[]>([]);
   const event = run.input_snapshot?.event as { severity?: number } | undefined;
   const triggers = run.input_snapshot?.triggers as
     { entity_id: string; rationale?: string }[] | undefined;
   const affected = items.filter((item) => item.depth > 0 && item.score > 0);
   const startingEntities = items.filter((item) => item.depth === 0);
-  const edges = new Map<
-    string,
-    {
-      id: string;
-      source: string;
-      target: string;
-      label: string;
-      markerEnd: { type: MarkerType };
-    }
-  >();
+  const edges = new Map<string, Edge>();
+  const rows = new Map<number, number>();
+  const analysisNodes: Node[] = [...items]
+    .sort(
+      (left, right) =>
+        left.depth - right.depth ||
+        left.entity_id.localeCompare(right.entity_id),
+    )
+    .map((item) => {
+      const row = rows.get(item.depth) ?? 0;
+      rows.set(item.depth, row + 1);
+      const role =
+        item.depth === 0
+          ? "Starting entity"
+          : item.score === 0
+            ? "No propagated impact"
+            : item.depth === 1
+              ? "Direct impact"
+              : "Indirect impact";
+      const roleClass =
+        item.depth === 0 ? "trigger" : item.depth === 1 ? "direct" : "indirect";
+      return {
+        id: item.entity_id,
+        position: { x: item.depth * 360, y: row * 150 },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        ariaLabel: `${item.entity_name}, ${role}, estimated impact ${item.score.toFixed(1)} out of 100`,
+        data: {
+          label: (
+            <>
+              <strong title={item.entity_name}>{item.entity_name}</strong>
+              <small>{role}</small>
+              <small>
+                {item.score.toFixed(1)} / 100 · {item.impact_level}
+              </small>
+            </>
+          ),
+        },
+        className: `analysis-node impact-${item.impact_level} propagation-${roleClass}${selectedEntity === item.entity_id ? " analysis-node-selected" : ""}`,
+      };
+    });
   for (const path of paths) {
     const steps = path.provenance.steps;
     steps.slice(1).forEach((step, index) => {
       const source = steps[index].entity_id;
       const id = step.dependency_id ?? `${source}:${step.entity_id}`;
+      const relationship =
+        step.relationship_label ?? step.relationship_type ?? "Dependency";
+      const shortLabel =
+        relationship.length > 18
+          ? `${relationship.slice(0, 17)}...`
+          : relationship;
       edges.set(id, {
         id,
         source,
         target: step.entity_id,
-        label: String(step.weight ?? ""),
+        label: `${shortLabel} · ${step.weight?.toFixed(2) ?? "-"}`,
+        ariaLabel: `${steps[index].entity_name} to ${step.entity_name}, ${relationship}, weight ${step.weight ?? "unknown"}, ${step.review_status ?? "unknown review"}`,
+        labelStyle: { fontSize: 11 },
         markerEnd: { type: MarkerType.ArrowClosed },
       });
     });
@@ -1585,67 +1654,46 @@ function AnalysisResults({
         </p>
       )}
       {items.length > 0 && (
-        <div className="result-canvas">
-          <ReactFlow
-            key={run.id}
-            fitView
-            nodes={items.map((item, index) => ({
-              id: item.entity_id,
-              position: initialPosition(index),
-              data: { label: `${item.entity_name} · ${item.score.toFixed(1)}` },
-              className: `impact-${item.impact_level}`,
-            }))}
+        <>
+          <ul className="analysis-role-legend" aria-label="Propagation roles">
+            <li className="role-legend-trigger">Starting entity</li>
+            <li className="role-legend-direct">Direct impact</li>
+            <li className="role-legend-indirect">Indirect impact</li>
+          </ul>
+          <AnalysisGraph
+            nodes={analysisNodes}
             edges={[...edges.values()]}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            edgesReconnectable={false}
-            deleteKeyCode={null}
-          >
-            <Background />
-            <Controls />
-          </ReactFlow>
-        </div>
+            select={(entityId) => {
+              setSelectedEntity(entityId);
+              setExpandedEntities((previous) =>
+                previous.includes(entityId)
+                  ? previous
+                  : [...previous, entityId],
+              );
+            }}
+          />
+        </>
       )}
       {items.map((item) => (
-        <details key={item.id}>
-          <summary>
-            {item.entity_name} · {item.score.toFixed(1)} · {item.impact_level} ·{" "}
-            {item.depth === 0
-              ? "Starting entity"
-              : item.depth === 1
-                ? "Direct impact"
-                : "Indirect impact"}
-          </summary>
-          <p>{item.explanation}</p>
-          <p>
-            Review confidence: {item.confidence_label}. {item.confidence_reason}
-          </p>
-          <ul>
-            {paths
-              .filter((path) => path.entity_id === item.entity_id)
-              .map((path) => (
-                <li key={path.id}>
-                  {path.provenance.entity_names.join(" → ")}{" "}
-                  {path.provenance.weights.length > 0 && (
-                    <span>· Weights {path.provenance.weights.join(", ")}</span>
-                  )}
-                </li>
-              ))}
-          </ul>
-          <button
-            className="secondary-button"
-            disabled={busy}
-            onClick={() => explain(item)}
-          >
-            Explain with AI
-          </button>
-        </details>
+        <ResultDetails
+          key={item.id}
+          item={item}
+          paths={paths}
+          api={api}
+          runId={run.id}
+          expanded={expandedEntities.includes(item.entity_id)}
+          selected={selectedEntity === item.entity_id}
+          toggle={(open) =>
+            setExpandedEntities((previous) =>
+              open === previous.includes(item.entity_id)
+                ? previous
+                : open
+                  ? [...previous, item.entity_id]
+                  : previous.filter((id) => id !== item.entity_id),
+            )
+          }
+        />
       ))}
-      {explanation && (
-        <div className="explanation" role="status">
-          {explanation}
-        </div>
-      )}
       {run.input_snapshot && (
         <details>
           <summary>Original analysis inputs</summary>
@@ -1653,6 +1701,216 @@ function AnalysisResults({
         </details>
       )}
     </section>
+  );
+}
+
+function AnalysisGraph({
+  nodes,
+  edges,
+  select,
+}: {
+  nodes: Node[];
+  edges: Edge[];
+  select: (entityId: string) => void;
+}) {
+  const container = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const compact = width > 0 && width < 600;
+  useEffect(() => {
+    if (!container.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setWidth(Math.round(entry.contentRect.width));
+    });
+    observer.observe(container.current);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div className="result-canvas" ref={container}>
+      <ReactFlow
+        fitView
+        minZoom={0.1}
+        fitViewOptions={ANALYSIS_FIT}
+        nodes={
+          compact
+            ? nodes.map((node) => ({
+                ...node,
+                position: {
+                  x: (node.position.y / 150) * 250,
+                  y: (node.position.x / 360) * 160,
+                },
+                sourcePosition: Position.Bottom,
+                targetPosition: Position.Top,
+              }))
+            : nodes
+        }
+        edges={edges}
+        onNodeClick={(_, node) => select(node.id)}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        edgesReconnectable={false}
+        deleteKeyCode={null}
+      >
+        <FitWhenMeasured layout={`${compact}:${width}`} />
+        <Background />
+        <Controls />
+      </ReactFlow>
+    </div>
+  );
+}
+
+const ANALYSIS_FIT = { padding: 0.15, minZoom: 0.1, maxZoom: 1.3 };
+
+function FitWhenMeasured({ layout }: { layout: string }) {
+  const measured = useNodesInitialized();
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    if (!measured) return;
+    const frame = requestAnimationFrame(() => void fitView(ANALYSIS_FIT));
+    return () => cancelAnimationFrame(frame);
+  }, [measured, layout, fitView]);
+  return null;
+}
+
+function ResultDetails({
+  item,
+  paths,
+  api,
+  runId,
+  expanded,
+  selected,
+  toggle,
+}: {
+  item: ImpactResult;
+  paths: ImpactPath[];
+  api: ApiClient;
+  runId: string;
+  expanded: boolean;
+  selected: boolean;
+  toggle: (open: boolean) => void;
+}) {
+  return (
+    <details
+      open={expanded}
+      data-selected={selected}
+      onToggle={(event) => toggle(event.currentTarget.open)}
+    >
+      <summary>
+        {item.entity_name} · {item.score.toFixed(1)} · {item.impact_level} ·{" "}
+        {item.depth === 0
+          ? "Starting entity"
+          : item.depth === 1
+            ? "Direct impact"
+            : "Indirect impact"}
+      </summary>
+      <p>{item.explanation}</p>
+      <p>
+        Review confidence: {item.confidence_label}. {item.confidence_reason}
+      </p>
+      <ul>
+        {paths
+          .filter((path) => path.entity_id === item.entity_id)
+          .map((path) => (
+            <li key={path.id}>
+              {path.provenance.entity_names.join(" → ")}{" "}
+              {path.provenance.weights.length > 0 && (
+                <span>· Weights {path.provenance.weights.join(", ")}</span>
+              )}
+            </li>
+          ))}
+      </ul>
+      {expanded && (
+        <ResultCommentary api={api} runId={runId} entityId={item.entity_id} />
+      )}
+    </details>
+  );
+}
+
+function ResultCommentary({
+  api,
+  runId,
+  entityId,
+}: {
+  api: ApiClient;
+  runId: string;
+  entityId: string;
+}) {
+  const [answer, setAnswer] = useState<AIExplanation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .getSavedExplanation(runId, entityId)
+      .then((saved) => {
+        if (active) setAnswer(saved);
+      })
+      .catch((error) => {
+        if (active) setError(message(error));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, runId, entityId, attempt]);
+
+  async function generate() {
+    setGenerating(true);
+    setError("");
+    try {
+      setAnswer(await api.explainAnalysis(runId, entityId));
+    } catch (error) {
+      setError(message(error));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <div className="result-commentary">
+      <h3>AI commentary</h3>
+      <p className="muted-copy">Human review required</p>
+      {loading && <p role="status">Loading saved commentary...</p>}
+      {generating && <p role="status">Generating commentary...</p>}
+      {!loading && !answer && !error && <p>No saved AI commentary.</p>}
+      {answer && (
+        <div className="explanation">
+          <small>{answer.model}</small>
+          <p>{answer.explanation}</p>
+        </div>
+      )}
+      {error && (
+        <p className="error-banner" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="toolbar">
+        <button
+          className="secondary-button"
+          disabled={loading || generating}
+          onClick={() => void generate()}
+        >
+          {answer ? "Regenerate commentary" : "Explain with AI"}
+        </button>
+        {error && (
+          <button
+            className="secondary-button"
+            disabled={loading || generating}
+            onClick={() => {
+              setLoading(true);
+              setError("");
+              setAttempt((previous) => previous + 1);
+            }}
+          >
+            Retry saved commentary
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

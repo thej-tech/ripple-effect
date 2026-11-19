@@ -5,6 +5,32 @@ export type Page<T> = {
   total: number;
 };
 
+export async function collectPages<T>(
+  load: (offset: number) => Promise<Page<T>>,
+): Promise<T[]> {
+  const items: T[] = [];
+  let offset = 0;
+  while (true) {
+    const page = await load(offset);
+    if (
+      page.offset !== offset ||
+      !Number.isInteger(page.limit) ||
+      page.limit <= 0 ||
+      !Number.isInteger(page.total) ||
+      page.total < offset ||
+      !Array.isArray(page.items) ||
+      page.items.length !== Math.min(page.limit, page.total - offset)
+    ) {
+      throw new Error(
+        "Pagination returned an incomplete or non-advancing page. Retry loading the data.",
+      );
+    }
+    items.push(...page.items);
+    offset += page.limit;
+    if (offset >= page.total) return items;
+  }
+}
+
 export type EntityType =
   | "person"
   | "department"
@@ -398,8 +424,9 @@ export class ApiClient {
     return payload as T;
   }
 
-  private page<T>(path: string, params = new URLSearchParams()) {
+  private page<T>(path: string, params = new URLSearchParams(), offset = 0) {
     params.set("limit", "100");
+    if (offset > 0) params.set("offset", String(offset));
     return this.request<Page<T>>(`${path}?${params.toString()}`);
   }
 
@@ -456,16 +483,16 @@ export class ApiClient {
     return this.request<{ status: string }>("/api/v1/health/ready");
   }
 
-  listEntities() {
-    return this.page<Entity>("/api/v1/entities");
+  listEntities(offset = 0) {
+    return this.page<Entity>("/api/v1/entities", undefined, offset);
   }
 
-  listDependencies() {
-    return this.page<Dependency>("/api/v1/dependencies");
+  listDependencies(offset = 0) {
+    return this.page<Dependency>("/api/v1/dependencies", undefined, offset);
   }
 
-  listEvents() {
-    return this.page<EventRecord>("/api/v1/events");
+  listEvents(offset = 0) {
+    return this.page<EventRecord>("/api/v1/events", undefined, offset);
   }
 
   createEntity(payload: {
@@ -621,9 +648,9 @@ export class ApiClient {
     });
   }
 
-  listRuns(eventId?: string) {
+  listRuns(eventId?: string, offset = 0) {
     const params = new URLSearchParams(eventId ? { event_id: eventId } : {});
-    return this.page<AnalysisRun>("/api/v1/analysis-runs", params);
+    return this.page<AnalysisRun>("/api/v1/analysis-runs", params, offset);
   }
 
   listScenarioRuns(scenarioId: string) {
@@ -736,9 +763,11 @@ export class ApiClient {
     );
   }
 
-  listPaths(runId: string, entityId: string) {
+  listPaths(runId: string, entityId: string, offset = 0) {
     return this.page<ImpactPath>(
       `/api/v1/analysis-runs/${runId}/results/${entityId}/paths`,
+      undefined,
+      offset,
     );
   }
 
@@ -750,5 +779,20 @@ export class ApiClient {
         body: JSON.stringify({ entity_id: entityId }),
       },
     );
+  }
+
+  async getSavedExplanation(
+    runId: string,
+    entityId: string,
+  ): Promise<AIExplanation | null> {
+    const params = new URLSearchParams({ entity_id: entityId });
+    try {
+      return await this.request<AIExplanation>(
+        `/api/v1/analysis-runs/${runId}/ai-explanation?${params}`,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
   }
 }

@@ -134,6 +134,8 @@ class DependencyActivation(RequestModel):
 
 
 class AssessmentOutput(RequestModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     recommended_weight: float = Field(strict=True, ge=0, le=1)
     reasoning: str = Field(min_length=1, max_length=5000)
     confidence: Literal["low", "medium", "high"]

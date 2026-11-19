@@ -7,8 +7,8 @@ use only; no Azure resources, registry publishing, or deployment are included.
 
 - Kubernetes API and web services use local `:local` images, have no public
   ingress, and are exposed only with `kubectl port-forward`.
-- The Kubernetes API uses a seeded ephemeral SQLite database and local auth.
-  Do not use real or production data.
+- The Kubernetes API uses an empty ephemeral SQLite database and local auth.
+  Demo seeding is disabled. Do not use real or production data.
 - Jenkins listens only on `127.0.0.1:8081`, has a persistent named home
   volume, and does not receive the Docker socket or Azure credentials.
 - Complete Jenkins' setup wizard yourself. Do not share the initial admin

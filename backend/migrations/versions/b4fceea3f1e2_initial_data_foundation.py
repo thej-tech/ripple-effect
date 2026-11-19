@@ -6,17 +6,16 @@ Create Date: 2026-11-07 12:57:36.139199
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b4fceea3f1e2"
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -135,7 +134,8 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "entity_type IN ('person', 'department', 'resource', 'activity', 'system', 'location', 'group')",
+            "entity_type IN ('person', 'department', 'resource', 'activity', "
+            "'system', 'location', 'group')",
             name="ck_entities_type",
         ),
         sa.CheckConstraint(
@@ -224,7 +224,8 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "role IN ('administrator', 'operations_coordinator', 'department_coordinator', 'analyst')",
+            "role IN ('administrator', 'operations_coordinator', "
+            "'department_coordinator', 'analyst')",
             name="ck_members_role",
         ),
         sa.CheckConstraint(
@@ -654,11 +655,13 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "action_type IN ('mitigation', 'weight_override', 'deactivate_dependency', 'hypothetical_dependency')",
+            "action_type IN ('mitigation', 'weight_override', "
+            "'deactivate_dependency', 'hypothetical_dependency')",
             name="ck_interventions_action_type",
         ),
         sa.CheckConstraint(
-            "(target_entity_id IS NOT NULL AND target_dependency_id IS NULL) OR (target_entity_id IS NULL AND target_dependency_id IS NOT NULL)",
+            "(target_entity_id IS NOT NULL AND target_dependency_id IS NULL) OR "
+            "(target_entity_id IS NULL AND target_dependency_id IS NOT NULL)",
             name="ck_interventions_single_target",
         ),
         sa.ForeignKeyConstraint(
@@ -709,15 +712,18 @@ def upgrade() -> None:
             name="ck_scenario_dependency_overrides_review_status",
         ),
         sa.CheckConstraint(
-            "dependency_id IS NOT NULL OR (length(trim(relationship_type)) > 0 AND length(trim(relationship_label)) > 0)",
+            "dependency_id IS NOT NULL OR (length(trim(relationship_type)) > 0 "
+            "AND length(trim(relationship_label)) > 0)",
             name="ck_scenario_dependency_overrides_hypothetical_label",
         ),
         sa.CheckConstraint(
-            "dependency_id IS NOT NULL OR (source_entity_id IS NOT NULL AND target_entity_id IS NOT NULL)",
+            "dependency_id IS NOT NULL OR "
+            "(source_entity_id IS NOT NULL AND target_entity_id IS NOT NULL)",
             name="ck_scenario_dependency_overrides_has_target",
         ),
         sa.CheckConstraint(
-            "source_entity_id IS NULL OR target_entity_id IS NULL OR source_entity_id <> target_entity_id",
+            "source_entity_id IS NULL OR target_entity_id IS NULL OR "
+            "source_entity_id <> target_entity_id",
             name="ck_scenario_dependency_overrides_not_self",
         ),
         sa.CheckConstraint(

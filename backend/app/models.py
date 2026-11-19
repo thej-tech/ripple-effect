@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -553,6 +553,51 @@ class ImpactResult(TimestampMixin, Base):
     primary_path_id: Mapped[UUID | None] = mapped_column(Uuid)
     explanation: Mapped[str] = mapped_column(Text, nullable=False, default="")
     result_flags: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class AnalysisExplanation(Base):
+    __tablename__ = "analysis_explanations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name="fk_analysis_explanations_organization",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "run_id", "entity_id"],
+            ["impact_results.organization_id", "impact_results.run_id", "impact_results.entity_id"],
+            name="fk_analysis_explanations_result_tenant",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["created_by_user_id"],
+            ["users.id"],
+            name="fk_analysis_explanations_creator",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_analysis_explanations_result_created",
+            "organization_id",
+            "run_id",
+            "entity_id",
+            "created_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    run_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    entity_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    context: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_by_user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
 
 
 class ScenarioEvent(Base):

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,7 @@ def test_fresh_migration_and_synthetic_seed_are_tenant_scoped(tmp_path, monkeypa
         "impact_results",
         "impact_paths",
         "impact_path_steps",
+        "analysis_explanations",
         "audit_logs",
         "alembic_version",
     } <= table_names
@@ -154,3 +156,23 @@ def test_fresh_migration_and_synthetic_seed_are_tenant_scoped(tmp_path, monkeypa
                 )
                 session.flush()
     engine.dispose()
+    command.check(config)
+    command.downgrade(config, "e52c93d6b018")
+    engine = make_engine(f"sqlite:///{database_path}")
+    assert "analysis_explanations" not in inspect(engine).get_table_names()
+    with Session(engine) as session:
+        assert session.scalar(select(func.count()).select_from(Entity)) == 20
+    engine.dispose()
+    command.upgrade(config, "head")
+    command.check(config)
+
+
+def test_commentary_migration_generates_postgresql_ddl(monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://localhost/ripple_offline")
+    output = StringIO()
+    config = Config(str(Path(__file__).parents[1] / "alembic.ini"), output_buffer=output)
+    command.upgrade(config, "head", sql=True)
+    ddl = output.getvalue()
+    assert "CREATE TABLE analysis_explanations" in ddl
+    assert "fk_analysis_explanations_result_tenant" in ddl
+    assert "FOREIGN KEY(organization_id, run_id, entity_id)" in ddl

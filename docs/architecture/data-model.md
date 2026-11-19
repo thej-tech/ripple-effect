@@ -38,8 +38,10 @@ the dependent tables for PostgreSQL.
 
 From `backend`, set `DATABASE_URL` to a local SQLite or PostgreSQL URL and run
 `uv run --locked alembic upgrade head`. Then set `APP_ENV=development` and run
-`uv run --locked python -m app.seed`. The seed is deterministic and idempotent
-and contains synthetic records for two organizations. It refuses to run
+`uv run --locked python -m app.seed`. The optional seed is deterministic and
+idempotent and contains synthetic records for two organizations. The
+application, Compose, and Kubernetes defaults never run it automatically. It
+refuses to run
 outside development/test or against a non-local PostgreSQL host. Never use
 these fixtures as real institutional data.
 

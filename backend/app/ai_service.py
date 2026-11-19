@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import UTC, datetime
 from typing import Any
@@ -38,14 +39,21 @@ def build_ai_prompt(context: dict[str, Any]) -> str:
         "Distinguish actual graph facts from possible improvements. "
         "Scores are heuristic estimates, not probabilities. Impact bands are heuristic "
         "labels. Confidence is dependency review quality, not likelihood.\n\n"
-        "Return concise sections with these headings exactly:\n"
+        "Use at most 90 words total, with one short sentence per section. "
+        "Focus on the selected entity, repeating its supplied impact band verbatim. "
+        "Only trigger_entities names the initiating components; other path nodes are dependents. "
+        "Do not assign impact bands or scores to other components. "
+        "Do not imply an existing failover strategy; "
+        "suggest evaluating feasibility with human review. "
+        "Do not repeat the supplied explanation or list every result. "
+        "Use these headings exactly:\n"
         "Actual Impact\n"
         "Propagation Reason\n"
         "Possible Improvements\n"
         "Under Possible Improvements, suggest only actions that require human review "
         "and mention unknown availability or conflicting information where applicable.\n\n"
         "SUPPLIED ANALYSIS CONTEXT:\n"
-        f"{context}"
+        f"{json.dumps(context, ensure_ascii=True, allow_nan=False, sort_keys=True)}"
     )
 
 
@@ -63,7 +71,7 @@ async def explain_with_ollama(context: dict[str, Any]) -> tuple[str, str]:
             },
             {"role": "user", "content": build_ai_prompt(context)},
         ],
-        "options": {"temperature": 0.2, "num_predict": 420},
+        "options": {"temperature": 0.2, "num_predict": 224},
     }
     return await _chat(payload)
 
@@ -85,7 +93,12 @@ async def assess_with_ollama(context: dict[str, Any]) -> dict[str, Any]:
                         "Keep the reasoning and uncertainty to one or two sentences each."
                     ),
                 },
-                {"role": "user", "content": str(context)},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        context, ensure_ascii=True, allow_nan=False, sort_keys=True
+                    ),
+                },
             ],
             "options": {"temperature": 0, "num_predict": 420},
         }
@@ -141,5 +154,8 @@ def ai_http_error(error: Exception) -> HTTPException:
         )
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="The local AI service is unavailable. The impact analysis remains usable.",
+        detail=(
+            "The local AI service is unavailable. Retry or enter a manual dependency weight. "
+            "Saved analyses remain available."
+        ),
     )

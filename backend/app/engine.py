@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal, TypeGuard
@@ -87,6 +88,7 @@ class AnalysisInput:
     max_nodes_per_run: int = MAX_NODES_PER_RUN
     include_trigger_entities: bool = True
     algorithm_version: str = ALGORITHM_VERSION
+    context: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -427,6 +429,9 @@ def analysis_input_from_snapshot(snapshot: dict[str, object]) -> AnalysisInput:
             _snapshot_value(snapshot, "algorithm_version"),
             "algorithm_version",
         ),
+        context=_snapshot_mapping(snapshot["context"], "context")
+        if "context" in snapshot
+        else None,
     )
 
 
@@ -619,7 +624,7 @@ def _canonical_snapshot(
     as_of: datetime,
     configuration: dict[str, object],
 ) -> dict[str, object]:
-    return {
+    snapshot: dict[str, object] = {
         "algorithm_version": analysis.algorithm_version,
         "organization_id": str(analysis.organization_id),
         "event": {
@@ -673,6 +678,9 @@ def _canonical_snapshot(
         ],
         "configuration": {**configuration, "as_of": as_of.isoformat()},
     }
+    if analysis.context is not None:
+        snapshot["context"] = deepcopy(analysis.context)
+    return snapshot
 
 
 def _confidence(statuses: tuple[str, ...]) -> tuple[float, str, str | None]:

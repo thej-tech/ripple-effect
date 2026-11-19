@@ -12,6 +12,7 @@ from app.models import (
     Entity,
     EventTrigger,
     OperationalEvent,
+    Organization,
     OrganizationMember,
 )
 from app.repositories import (
@@ -49,6 +50,38 @@ def get_entity_for_member(
             detail="Entity was not found in this organization.",
         )
     return entity
+
+
+def build_dependency_assessment_context(
+    session: Session,
+    membership: OrganizationMember,
+    dependency: Dependency,
+) -> dict[str, object]:
+    workspace = session.get(Organization, membership.organization_id)
+    if workspace is None:
+        raise HTTPException(404, "Workspace was not found.")
+
+    def entity_context(entity_id: UUID) -> dict[str, object]:
+        entity = get_entity_for_member(session, membership, entity_id)
+        return {
+            "name": entity.name,
+            "description": entity.description,
+            "category": entity.entity_type,
+            "status": entity.status,
+            "exposure": entity.exposure,
+            "mitigation": entity.mitigation,
+            "attributes": entity.attributes,
+        }
+
+    return {
+        "workspace": {"name": workspace.name, "description": workspace.description},
+        "source": entity_context(dependency.source_entity_id),
+        "target": entity_context(dependency.target_entity_id),
+        "direction": "A disruption in source may affect target; target depends on source.",
+        "relationship_type": dependency.relationship_type,
+        "relationship_label": dependency.relationship_label,
+        "context": dependency.rationale,
+    }
 
 
 def list_entities_for_member(session: Session, membership: OrganizationMember) -> list[Entity]:

@@ -17,11 +17,13 @@ from app.ai_service import (
 )
 from app.analysis_service import (
     create_analysis_run_for_member,
+    get_analysis_explanation_for_member,
     get_analysis_run_for_member,
     get_impact_result_for_member,
     page_analysis_runs_for_member,
     page_impact_paths_for_member,
     page_impact_results_for_member,
+    save_analysis_explanation_for_member,
 )
 from app.auth import Permission, authorize, get_active_membership, parse_local_user_id
 from app.database import get_session
@@ -95,6 +97,7 @@ from app.services import (
     _check_updated_at,
     _record_change,
     archive_entity,
+    build_dependency_assessment_context,
     create_dependency,
     create_entity,
     create_event,
@@ -747,12 +750,14 @@ def get_analysis_run_endpoint(
     summary="Explain a persisted analysis using local Ollama",
     description=(
         "Requires event:read permission. Sends bounded persisted result and path "
-        "context to the configured localhost Ollama service. It does not calculate or write data."
+        "context to local Ollama and saves the commentary with an audit record. "
+        "It does not change calculation inputs or scores."
     ),
 )
 async def explain_analysis_endpoint(
     run_id: UUID,
     payload: AIExplanationRequest,
+    request: Request,
     membership: MembershipDependency,
     session: SessionDependency,
 ) -> AIExplanationResponse:
@@ -772,16 +777,10 @@ async def explain_analysis_endpoint(
         limit=10,
         offset=0,
     )
-    result_page, _ = page_impact_results_for_member(
-        session,
-        membership,
-        run_id,
-        limit=8,
-        offset=0,
-    )
     selected_response = _impact_result_response(result)
     snapshot = run.input_snapshot or {}
-    context = {
+    entity_names = {item["id"]: item["name"] for item in snapshot.get("entities", [])}
+    context: dict[str, object] = {
         "event": snapshot.get("event")
         or {
             "title": event.title,
@@ -789,6 +788,13 @@ async def explain_analysis_endpoint(
             "status": event.status,
         },
         "triggers": snapshot.get("triggers", []),
+        "trigger_entities": [
+            {
+                "id": item["entity_id"],
+                "name": entity_names.get(item["entity_id"], "Unknown saved name"),
+            }
+            for item in snapshot.get("triggers", [])
+        ],
         "selected_entity": {
             "name": selected_response.entity_name,
             "type": selected_response.entity_type,
@@ -797,18 +803,7 @@ async def explain_analysis_endpoint(
             "impact_band": selected_response.impact_level,
             "confidence": selected_response.confidence_label,
             "confidence_reason": selected_response.confidence_reason,
-            "existing_explanation": selected_response.explanation,
         },
-        "top_results": [
-            {
-                "entity": _impact_result_response(item).entity_name,
-                "depth": _impact_result_response(item).depth,
-                "score": _impact_result_response(item).score,
-                "impact_band": _impact_result_response(item).impact_level,
-                "confidence": _impact_result_response(item).confidence_label,
-            }
-            for item in result_page
-        ],
         "retained_paths": [
             {
                 "score": path.score,
@@ -822,11 +817,39 @@ async def explain_analysis_endpoint(
             for path in paths
         ],
     }
+    session.rollback()
     try:
         explanation, model = await explain_with_ollama(context)
-    except Exception as error:
+    except (OllamaResponseError, OllamaUnavailableError) as error:
         raise ai_http_error(error) from error
+    save_analysis_explanation_for_member(
+        session,
+        membership,
+        run_id,
+        payload.entity_id,
+        model=model,
+        explanation=explanation,
+        context=context,
+        request_id=_request_id(request),
+    )
+    _commit(session)
     return AIExplanationResponse(model=model, explanation=explanation)
+
+
+@router.get(
+    "/analysis-runs/{run_id}/ai-explanation",
+    response_model=AIExplanationResponse,
+    tags=["analysis"],
+    summary="Retrieve the latest saved AI commentary without calling Ollama",
+)
+def get_analysis_explanation_endpoint(
+    run_id: UUID,
+    entity_id: UUID,
+    membership: MembershipDependency,
+    session: SessionDependency,
+) -> AIExplanationResponse:
+    record = get_analysis_explanation_for_member(session, membership, run_id, entity_id)
+    return AIExplanationResponse(model=record.model, explanation=record.explanation)
 
 
 @router.get(
@@ -1155,26 +1178,7 @@ async def assess_dependency_endpoint(
     authorize(membership, Permission.DEPENDENCY_WRITE)
     dependency = get_dependency_for_member(session, membership, dependency_id)
     expected_updated_at = dependency.updated_at
-
-    def entity_context(entity_id: UUID) -> dict[str, object]:
-        entity = get_entity_for_member(session, membership, entity_id)
-        return {
-            "name": entity.name,
-            "description": entity.description,
-            "category": entity.entity_type,
-            "status": entity.status,
-            "exposure": entity.exposure,
-            "mitigation": entity.mitigation,
-            "attributes": entity.attributes,
-        }
-
-    context = {
-        "source": entity_context(dependency.source_entity_id),
-        "target": entity_context(dependency.target_entity_id),
-        "relationship_type": dependency.relationship_type,
-        "relationship_label": dependency.relationship_label,
-        "context": dependency.rationale,
-    }
+    context = build_dependency_assessment_context(session, membership, dependency)
     session.rollback()
     try:
         assessment = await assess_with_ollama(context)
@@ -1182,13 +1186,9 @@ async def assess_dependency_endpoint(
         raise ai_http_error(error) from error
     dependency = get_dependency_for_member(session, membership, dependency_id, for_update=True)
     _check_updated_at(dependency.updated_at, expected_updated_at)
-    if (
-        entity_context(dependency.source_entity_id) != context["source"]
-        or entity_context(dependency.target_entity_id) != context["target"]
-    ):
-        raise HTTPException(409, "An endpoint changed during assessment. Request a new assessment.")
-    dependency.assessment = assessment
-    dependency.review_status = "draft"
+    if build_dependency_assessment_context(session, membership, dependency) != context:
+        raise HTTPException(409, "The context changed during assessment. Request a new assessment.")
+    dependency.assessment = {**assessment, "input_context": context}
     dependency.updated_at = datetime.now(UTC)
     _record_change(
         session,
@@ -1196,7 +1196,7 @@ async def assess_dependency_endpoint(
         "dependency.assessed",
         "dependency",
         dependency.id,
-        assessment,
+        {"decision": "pending", "model": assessment["model"]},
         _request_id(request),
     )
     _commit(session)
@@ -1218,10 +1218,15 @@ def decide_dependency_assessment_endpoint(
     if payload.decision != "override" and assessment.get("decision") != "pending":
         raise HTTPException(409, "Request a new assessment before approving or rejecting it.")
     if payload.decision == "approve":
+        if assessment.get("input_context") != build_dependency_assessment_context(
+            session, membership, dependency
+        ):
+            raise HTTPException(409, "The assessment context changed. Request a new assessment.")
         dependency.weight = assessment["recommended_weight"]
     elif payload.weight is not None:
         dependency.weight = payload.weight
-    dependency.review_status = "draft" if payload.decision == "reject" else "validated"
+    if payload.decision != "reject":
+        dependency.review_status = "validated"
     dependency.updated_at = datetime.now(UTC)
     assessment.update(
         decision=payload.decision,
@@ -1235,7 +1240,7 @@ def decide_dependency_assessment_endpoint(
         "dependency.assessment_decided",
         "dependency",
         dependency.id,
-        assessment,
+        {"decision": payload.decision, "effective_weight": assessment["effective_weight"]},
         _request_id(request),
     )
     _commit(session)

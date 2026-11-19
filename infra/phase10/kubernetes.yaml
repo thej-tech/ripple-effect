@@ -14,7 +14,7 @@ data:
   APP_ENV: development
   DATABASE_URL: sqlite:////tmp/ripple-effect-phase10.sqlite3
   ENABLE_LOCAL_AUTH: "true"
-  SEED_DEMO_DATA: "true"
+  SEED_DEMO_DATA: "false"
 ---
 apiVersion: apps/v1
 kind: Deployment

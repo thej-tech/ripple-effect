@@ -10,9 +10,10 @@ The backend tests compare generated OpenAPI to the committed snapshot.
 
 Business routes require an active membership selected explicitly by the
 caller. For local development only, enable the adapter with
-`APP_ENV=development` and `ENABLE_LOCAL_AUTH=true`; send the seed user's ID in
+`APP_ENV=development` and `ENABLE_LOCAL_AUTH=true`; send the local user's ID in
 `X-Local-User-ID` and the selected organization ID in
-`X-Active-Organization-ID`. The seed command prints both demo user IDs. Local
+`X-Active-Organization-ID`. `python -m app.local_account` registers a local
+development account without seeding workspaces and prints its ID. Local
 identity headers are disabled by default and are not production
 authentication. A client cannot supply a role or create a membership through
 these headers.
@@ -63,6 +64,10 @@ the database supports row locks.
 - `/dependencies`: list/filter, retrieve, create, update, activate and
   deactivate. Source-to-target orientation is retained; self-loops,
   duplicates, and cross-organization endpoints are rejected.
+- `/dependencies/{dependency_id}/assessment`: request a structured Ollama
+  recommendation with workspace, component, and relationship context.
+- `/dependencies/{dependency_id}/assessment/decision`: approve, reject, or
+  manually override a recommendation using an `expected_updated_at` check.
 - `/events`: list/filter, retrieve, create, update and lifecycle transitions.
   New events start as draft unless explicitly created open. Only an
   administrator may reopen a resolved or archived event.
@@ -72,6 +77,8 @@ the database supports row locks.
 - `/analysis-runs`: list runs, optionally filtered by `event_id`; retrieve a
   run, its paginated results, an individual result, or the retained paths for
   that result. The collection also accepts `scenario_id`.
+- `/analysis-runs/{run_id}/ai-explanation`: generate and save commentary with
+  POST, or retrieve the latest saved commentary for an entity with GET.
 - `/scenarios`: create scenarios from completed live-run snapshots and list
   scenarios in the active organization.
 - `/scenarios/{scenario_id}`: retrieve scenario overlays, update metadata with
@@ -155,8 +162,11 @@ Analysis accepts optional `as_of`, `max_depth` (1–10, default 4),
 `min_edge_weight` (0–1, default 0), `depth_attenuation` (0–1, default 0.8),
 `aggregation` (`max` or `capped_sum`), `max_paths_per_trigger` (1–10,000,
 default 10,000), `max_nodes_per_run` (1–5,000, default 5,000), and
-`include_trigger_entities` (default true). When omitted, `as_of` uses the
-event's start time. A run that reaches either safety ceiling is saved as
+`include_trigger_entities` (default true). The live service currently defaults
+`as_of` to the current UTC time; the pure engine defaults to event start when
+no override is supplied. This differs from the original brief and remains an
+explicit unresolved decision, not a Phase 2 scoring change.
+A run that reaches either safety ceiling is saved as
 `completed_with_limits`; its summary and each result flag the incomplete
 analysis. Run responses include the canonical input hash, algorithm version,
 configuration and summary. Results explain the primary path, minimum depth,
@@ -168,3 +178,48 @@ where supported, but SQLite does not provide equivalent row-lock behavior and
 PostgreSQL concurrent-insert consistency has not yet been stress-tested.
 Organization/member administration, audit-query and production
 sign-in/session endpoints are not implemented.
+
+## Weight recommendation lifecycle
+
+Assessment requests and decisions require the existing `dependency:write`
+permission. A recommendation is saved as pending and does not change the
+effective numeric weight or approve itself. Reassessment and rejection preserve
+an existing reviewed/validated weight. A new draft dependency remains draft
+until explicitly approved or manually overridden.
+
+The saved recommendation includes its input context. Approval returns 409 if
+that context no longer matches the workspace, components, or relationship.
+Pending recommendations created before context capture was implemented must
+be reassessed before approval. Manual override remains available without AI.
+Relationship edits invalidate recommendations as before. Snapshot context
+captures recommendations and decisions as they stood when each run was made.
+
+## Saved AI commentary
+
+Apply migration `f64d81a2c039` through `alembic upgrade head` before using the
+updated API. Back up existing databases before migrating them.
+
+- `POST /api/v1/analysis-runs/{run_id}/ai-explanation` accepts
+  `{"entity_id": "<entity UUID>"}`. It sends persisted calculation context to
+  local Ollama and appends the successful response and a same-transaction audit
+  record. No database transaction is held while waiting for model inference.
+- `GET /api/v1/analysis-runs/{run_id}/ai-explanation?entity_id=<entity UUID>`
+  returns the latest saved response, without calling Ollama. A result without
+  saved commentary returns 404; GET never silently generates it.
+- Both responses retain the compatible `model` and `explanation` fields.
+  Both operations use the existing `event:read` permission and tenant-scoped
+  result lookup. Cross-tenant access returns 404.
+
+Commentary records retain the exact supplied context, model, input hash, author,
+and UTC creation time. Regeneration appends rather than overwrites; the read
+endpoint currently exposes only the latest record per entity/result. Failed
+inference creates no commentary or success audit record and does not remove a
+previous response. Expected model errors return 502 or 503. Calculation inputs,
+scores, and deterministic engine explanations remain unchanged.
+
+New input snapshots include an optional `context` section with workspace
+details, event description/duration, component descriptions/metadata, and
+dependency assessments. This context is hashed but does not affect scores.
+Legacy snapshots omit that section during replay and retain their original
+canonical shape. Older snapshots cannot recover descriptive data they never
+stored; no history is backfilled from changed live records.
