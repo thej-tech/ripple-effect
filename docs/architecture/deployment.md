@@ -3,7 +3,9 @@
 ## Local development
 
 Docker Compose provides the local PostgreSQL, API and web stack. It enables
-local authentication and synthetic seed data only for development. It is not a
+local authentication for development only. Synthetic seed data is disabled by
+default; set `SEED_DEMO_DATA=true` only for an explicit fixture demonstration.
+It is not a
 production identity or deployment configuration; see the root
 [`README.md`](../../README.md) for setup and verification commands.
 

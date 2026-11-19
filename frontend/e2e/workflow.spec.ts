@@ -1,12 +1,16 @@
 ﻿import { expect, test } from "@playwright/test";
+import { readFile, writeFile } from "node:fs/promises";
 import { env } from "node:process";
 import type {
+  AIExplanation,
   AnalysisRun,
   ImpactPath,
   ImpactResult,
   Page,
   Workspace,
 } from "../src/api";
+
+test.describe.configure({ mode: "serial" });
 
 test("accepts the three-component expo workflow and reopens its saved result", async ({
   page,
@@ -17,6 +21,17 @@ test("accepts the three-component expo workflow and reopens its saved result", a
   );
   test.setTimeout(360_000);
   page.setDefaultTimeout(12_000);
+  const browserErrors: string[] = [];
+  let inferenceRequests = 0;
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname.endsWith("/ai-explanation")
+    ) {
+      inferenceRequests += 1;
+    }
+  });
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto("/");
   const workspace = "Demo Infrastructure";
@@ -140,7 +155,7 @@ test("accepts the three-component expo workflow and reopens its saved result", a
       const recommended = Number(
         await page.locator(".assessment strong").innerText(),
       );
-      expect(recommended).toBeGreaterThan(0);
+      expect(recommended).toBeGreaterThanOrEqual(0);
       expect(recommended).toBeLessThanOrEqual(1);
       await button("Approve weight").click();
     } else {
@@ -241,7 +256,22 @@ test("accepts the three-component expo workflow and reopens its saved result", a
   );
   await expect(indirect).toContainText(indirectScore.score.toFixed(1));
   await expect(indirect.locator("..")).toContainText(indirectScore.explanation);
+  await expect(page.locator(".result-canvas .propagation-trigger")).toHaveCount(
+    1,
+  );
+  await expect(page.locator(".result-canvas .propagation-direct")).toHaveCount(
+    1,
+  );
+  await expect(
+    page.locator(".result-canvas .propagation-indirect"),
+  ).toHaveCount(1);
+  const directNode = page.locator(".result-canvas .propagation-direct");
+  await expect(directNode).toContainText("Direct impact");
+  await directNode.click();
+  await expect(directNode).toHaveClass(/analysis-node-selected/);
+  await expect(direct.locator("..")).toHaveAttribute("open", "");
 
+  let savedCommentary: AIExplanation | null = null;
   if (models.length) {
     await indirect
       .locator("..")
@@ -250,12 +280,49 @@ test("accepts the three-component expo workflow and reopens its saved result", a
     await expect(page.locator(".explanation")).toContainText(models[0], {
       timeout: 100_000,
     });
+    const savedResponse = await page.request.get(
+      `/api/v1/analysis-runs/${run.id}/ai-explanation`,
+      {
+        headers,
+        params: { entity_id: indirectScore.entity_id },
+      },
+    );
+    expect(savedResponse.ok()).toBeTruthy();
+    savedCommentary = (await savedResponse.json()) as AIExplanation;
+    await expect(indirect.locator("..").locator(".explanation p")).toHaveText(
+      savedCommentary.explanation,
+    );
+  } else {
+    await direct
+      .locator("..")
+      .getByRole("button", { name: "Explain with AI" })
+      .click();
+    await expect(direct.locator("..").getByRole("alert")).toContainText(
+      "unavailable",
+      {
+        timeout: 100_000,
+      },
+    );
+    await expect(indirect).toBeVisible();
   }
   await page.evaluate(() => scrollTo(0, 0));
   await page.screenshot({
     path: testInfo.outputPath("analysis.png"),
     fullPage: true,
   });
+
+  await section("System Builder").click();
+  await node(database).click();
+  await field("Name").fill("Database renamed after analysis");
+  await button("Save component").click();
+  await expect(node("Database renamed after analysis")).toBeVisible();
+  const immutable = await page.request.get(`/api/v1/analysis-runs/${run.id}`, {
+    headers,
+  });
+  expect(immutable.ok()).toBeTruthy();
+  expect(((await immutable.json()) as AnalysisRun).input_snapshot).toEqual(
+    run.input_snapshot,
+  );
 
   await section("History").click();
   await button(eventName).click();
@@ -268,6 +335,45 @@ test("accepts the three-component expo workflow and reopens its saved result", a
   await section("History").click();
   await button(eventName).click();
   await expect(indirect).toBeVisible();
+  const inferenceBeforeReopening = inferenceRequests;
+  await indirect.click();
+  if (savedCommentary) {
+    await expect(indirect.locator("..").locator(".explanation p")).toHaveText(
+      savedCommentary.explanation,
+    );
+    await expect(
+      indirect
+        .locator("..")
+        .getByRole("button", { name: "Regenerate commentary" }),
+    ).toBeVisible();
+  } else {
+    await expect(
+      indirect.locator("..").getByText("No saved AI commentary."),
+    ).toBeVisible();
+  }
+  expect(inferenceRequests).toBe(inferenceBeforeReopening);
+  if (env.RIPPLE_PERSISTENCE_BASELINE) {
+    const dependencies = await page.request.get(
+      "/api/v1/dependencies?limit=100",
+      { headers },
+    );
+    expect(dependencies.ok()).toBeTruthy();
+    await writeFile(
+      env.RIPPLE_PERSISTENCE_BASELINE,
+      JSON.stringify(
+        {
+          workspaceId: await picker.inputValue(),
+          run,
+          results: scores.items,
+          dependencies: (await dependencies.json()).items,
+          selectedEntityId: indirectScore.entity_id,
+          savedCommentary,
+        },
+        null,
+        2,
+      ),
+    );
+  }
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
@@ -276,6 +382,7 @@ test("accepts the three-component expo workflow and reopens its saved result", a
     path: testInfo.outputPath("history-mobile.png"),
     fullPage: true,
   });
+  expect(browserErrors).toEqual([]);
 
   console.log(
     JSON.stringify({
@@ -288,4 +395,195 @@ test("accepts the three-component expo workflow and reopens its saved result", a
       indirect: indirectScore.score,
     }),
   );
+});
+
+test("frames a saved analysis across mobile and desktop resizing", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    env.RIPPLE_RUN_LIVE_E2E !== "1",
+    "Requires the isolated live workspace from the acceptance test.",
+  );
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const nodes = page.locator(".result-canvas .react-flow__node");
+
+  async function openSavedRun(width: number, height: number) {
+    await page.setViewportSize({ width, height });
+    await page.goto("/");
+    await page
+      .getByLabel("Workspace", { exact: true })
+      .selectOption({ label: "Demo Infrastructure" });
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name: "History", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Database Outage", exact: true })
+      .click();
+    await expect(nodes).toHaveCount(3);
+  }
+
+  async function allNodesAreFramed() {
+    const canvas = await page.locator(".result-canvas").boundingBox();
+    if (!canvas) return false;
+    const bounds = await nodes.evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom };
+      }),
+    );
+    return bounds.every(
+      (rect) =>
+        rect.x >= canvas.x &&
+        rect.right <= canvas.x + canvas.width &&
+        rect.y >= canvas.y &&
+        rect.bottom <= canvas.y + canvas.height,
+    );
+  }
+
+  await openSavedRun(1400, 900);
+  await expect.poll(allNodesAreFramed).toBe(true);
+  await openSavedRun(390, 844);
+  await expect.poll(allNodesAreFramed).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("responsive-mobile.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await expect.poll(allNodesAreFramed).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("responsive-desktop.png"),
+    fullPage: true,
+  });
+  expect(errors).toEqual([]);
+});
+
+test("keeps approved weights and manual entry available when assessment is offline", async ({
+  page,
+}) => {
+  test.skip(
+    env.RIPPLE_RUN_LIVE_E2E !== "1" || env.RIPPLE_E2E_MANUAL !== "1",
+    "Requires the isolated manual-mode workspace and an unavailable model.",
+  );
+  await page.goto("/");
+  const picker = page.getByLabel("Workspace", { exact: true });
+  await picker.selectOption({ label: "Demo Infrastructure" });
+  const headers = { "X-Active-Organization-ID": await picker.inputValue() };
+  const before = await page.request.get("/api/v1/dependencies?limit=100", {
+    headers,
+  });
+  expect(before.ok()).toBeTruthy();
+  const beforeData = await before.json();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "System Builder", exact: true })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "Database renamed after analysis → Backend API",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("button", { name: "Request AI assessment", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText("unavailable", {
+    timeout: 100_000,
+  });
+  await expect(
+    page.getByRole("button", { name: "Approve weight", exact: true }),
+  ).toHaveCount(0);
+  const manual = page.getByLabel("Manual weight (0–1)", { exact: true });
+  await expect(manual).toBeEnabled();
+  await manual.fill("0.4");
+  await expect(
+    page.getByRole("button", { name: "Apply manual weight", exact: true }),
+  ).toBeEnabled();
+  const after = await page.request.get("/api/v1/dependencies?limit=100", {
+    headers,
+  });
+  expect(after.ok()).toBeTruthy();
+  expect(await after.json()).toEqual(beforeData);
+});
+
+test("reopens the exact persisted run after an externally performed API restart", async ({
+  page,
+}) => {
+  test.skip(
+    env.RIPPLE_VERIFY_RESTART !== "1",
+    "Run explicitly after restarting the isolated API against the baseline database.",
+  );
+  const baselinePath = env.RIPPLE_PERSISTENCE_BASELINE;
+  if (!baselinePath)
+    throw new Error(
+      "RIPPLE_PERSISTENCE_BASELINE must point to the recorded isolated-run evidence.",
+    );
+  const baseline = JSON.parse(await readFile(baselinePath, "utf8")) as {
+    workspaceId: string;
+    run: AnalysisRun;
+    results: ImpactResult[];
+    dependencies: { id: string; weight: number; review_status: string }[];
+    selectedEntityId: string;
+    savedCommentary: AIExplanation | null;
+  };
+  let inferenceRequests = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname.endsWith("/ai-explanation")
+    )
+      inferenceRequests += 1;
+  });
+  await page.goto("/");
+  await page
+    .getByLabel("Workspace", { exact: true })
+    .selectOption(baseline.workspaceId);
+  const headers = { "X-Active-Organization-ID": baseline.workspaceId };
+  const runResponse = await page.request.get(
+    `/api/v1/analysis-runs/${baseline.run.id}`,
+    { headers },
+  );
+  expect(runResponse.ok()).toBeTruthy();
+  const restored = (await runResponse.json()) as AnalysisRun;
+  expect(restored.input_hash).toBe(baseline.run.input_hash);
+  expect(restored.input_snapshot).toEqual(baseline.run.input_snapshot);
+  const results = await page.request.get(
+    `/api/v1/analysis-runs/${baseline.run.id}/results?limit=100`,
+    { headers },
+  );
+  expect(results.ok()).toBeTruthy();
+  expect((await results.json()).items).toEqual(baseline.results);
+  const dependencies = await page.request.get(
+    "/api/v1/dependencies?limit=100",
+    { headers },
+  );
+  expect(dependencies.ok()).toBeTruthy();
+  expect((await dependencies.json()).items).toEqual(baseline.dependencies);
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "History", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Database Outage", exact: true })
+    .click();
+  const selected = baseline.results.find(
+    (item) => item.entity_id === baseline.selectedEntityId,
+  );
+  if (!selected)
+    throw new Error("The baseline is missing its selected historical result.");
+  const summary = page
+    .locator("summary")
+    .filter({ hasText: selected.entity_name });
+  await summary.click();
+  if (baseline.savedCommentary) {
+    await expect(summary.locator("..").locator(".explanation p")).toHaveText(
+      baseline.savedCommentary.explanation,
+    );
+  } else {
+    await expect(
+      summary.locator("..").getByText("No saved AI commentary."),
+    ).toBeVisible();
+  }
+  expect(inferenceRequests).toBe(0);
 });

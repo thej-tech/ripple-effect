@@ -170,7 +170,8 @@ def test_two_edge_synopsis_example_scores_32_256_and_displays_32_3() -> None:
     assert f"{result_for(output, 12).score:.1f}" == "32.3"
 
 
-def test_stored_snapshot_reproduces_the_complete_analysis_output() -> None:
+@pytest.mark.parametrize("context", [None, {"workspace": {"name": "User-defined system"}}])
+def test_stored_snapshot_reproduces_the_complete_analysis_output(context) -> None:
     analysis = make_input(
         dependencies=(
             dependency(20, 10, 11, 0.8, review_status="reviewed"),
@@ -178,11 +179,13 @@ def test_stored_snapshot_reproduces_the_complete_analysis_output() -> None:
         ),
         aggregation="capped_sum",
     )
+    analysis = replace(analysis, context=context)
 
     original = run_analysis(analysis)
     replayed = run_analysis(analysis_input_from_snapshot(original.input_snapshot))
 
     assert replayed == original
+    assert ("context" in original.input_snapshot) == (context is not None)
 
 
 def test_invalid_stored_snapshot_is_rejected() -> None:

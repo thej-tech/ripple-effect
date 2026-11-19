@@ -1,12 +1,82 @@
 # Ripple Effect — Project Progress
 
-- Last updated: 2026-11-19
-- Current phase: CDD expo transformation — Phases 0–4 complete
-- Current branch: `feature/ripple-demo-transformation`
+- Last updated: 2026-11-20
+- Current phase: Product improvement Phase 5 final polish complete; all five improvement phases done
+- Current branch: `project` (observed during the improvement audit)
 - Original transformation checkpoint: `d226b2b` — Initial checkpoint before Ripple Effect transformation
 - Phase 10 implementation commit: `874ef74`
 - Base commit: `b469fd4` (Phase 9 preparation)
-- Overall status: CDD expo Phases 0–4 are implemented and verified on the dedicated feature branch. Changes are uncommitted. Genuine local Ollama integration uses `qwen2.5:3b`; NetworkX remains the only scoring engine and AI remains suggestion-only. Phase 9 remains PARTIAL. Phase 10 pipeline status conflicts between its report and progress notes and needs human reconciliation.
+- Overall status: All five improvement phases are complete. Full backend/frontend lint, formatting, tests, and production build pass; genuine local Qwen browser acceptance and restart persistence pass on fresh isolated data. Original data, styling, scoring, timeouts, and authorization remain unchanged.
+
+## Product improvement final polish - 2026-11-20 (COMPLETE)
+
+- Approval: human explicitly approved Phase 5.
+- Report: [Phase 5 final polish](reports/product-improvement-phase5-polish.md), including setup, environment variables, and limitations.
+- Done: frontend LF rule plus line-ending-only normalization of 18 files; style-only historical migration lint fixes with identical offline PostgreSQL DDL; demo seeding is opt-in for Compose and local Kubernetes; builder dependency-order layout; measured-node graph fitting; legend contrast fix; documentation reconciliation.
+- Verification: 114 backend tests, full backend Ruff lint/format, 20 frontend tests, ESLint, full Prettier, production build, fresh genuine-Qwen Chrome journey (72.0 direct / 28.8 indirect), framing regression, and API restart persistence passed.
+- Not run: `docker compose config` (Docker CLI unavailable in this shell); standalone E2E TypeScript check (`@types/node` absent).
+- Open: production identity, unmounted scenario/legacy graph components, live PostgreSQL, Compose/Nginx identity path, three semantic brief decisions, human UX evidence. No commit, remote Git action, or deployment was performed.
+
+## Product improvement integration - 2026-11-19 (COMPLETE)
+
+- Final report: [Phase 4 integration complete](reports/product-improvement-phase4-integration-complete.md). The earlier partial report remains historical evidence.
+- Authorized local AI: verified official portable Ollama v0.40.16 and `qwen2.5:3b` digest `357c53fb...e4b`, stored under ignored `backend/.venv/`, loopback-only with cloud disabled. Setup and licence notes are in [the portable runbook](runbooks/local-ollama-portable.md).
+- Live findings fixed with regressions: commentary timed out at the existing 90-second deadline, then mislabeled a neighboring band and trigger. Commentary is now concise, selected-result-focused, and grounded in named immutable triggers. The deadline was not raised.
+- Final real-model result: approved recommended weights 1.0 and 0.5 produced 72.0 direct and 28.8 indirect impact. Saved commentary named Database as the trigger, survived refresh, and restored exactly after an API restart with Ollama stopped and zero inference requests.
+- Verification: final genuine Chrome stages passed; 114 backend tests and 19 frontend tests passed; backend lint/formatting, frontend lint, and production build passed.
+- Preview: `http://127.0.0.1:5195`, isolated API `127.0.0.1:8035`, local model `127.0.0.1:11434`. The preview contains acceptance-test data only.
+- Remaining for Phase 5: full frontend formatting baseline, historical migration lint, demo-seeding defaults, optional E2E Node types, final UI polish, and documentation reconciliation. Production identity, live PostgreSQL, and semantic brief conflicts remain separately unresolved.
+
+## Product improvement integration - 2026-11-19 (EARLIER PARTIAL STAGE)
+
+- Approval: human explicitly approved Phase 4 after the frontend report. Do not treat this partial report as approval to start Phase 5.
+- Report: [Phase 4 integration](reports/product-improvement-phase4-integration.md).
+- Done: stronger live tests for exact saved-commentary reopening (genuine branch pending), immutable history after live component edits, optional restart-baseline capture, an unavailable-assessment safety case, and an opt-in read-only post-restart stage. Only tests/docs were edited; no production code, runtime dependency, schema, scoring, or auth change.
+- Verified: staged Chrome journey and responsive History passed (2 passed / 1 intentional restart skip at that initial stage); unavailable assessment passed separately; post-restart exact persistence passed separately. Current backend suite: 113 passed; frontend suite: 19 passed; normal TypeScript, ESLint, and changed-test formatting passed.
+- Restart evidence: stopped isolated API PID 23284, readiness then refused connection, and new PID 21700 reopened the same SQLite file without seed/reset/migration. Run snapshot/hash, results, approved dependency records, and UI History matched the baseline. This is API/embedded-SQLite restart evidence, not live PostgreSQL or OS-reboot evidence.
+- Isolation: new `backend/.venv/phase4-integration-20261119-1.sqlite3`; local evidence `backend/.venv/phase4-persistence-baseline.json`. Original databases and the Phase 3 preview were left unchanged. Manual weights 0.8/0.75 and severity 90 yielded direct 57.6 and indirect 34.56.
+- Preview running: `http://127.0.0.1:5194`, loopback API `http://127.0.0.1:8034`. The older 5193/8033 preview remains separate.
+- Blocker: local Ollama tags endpoint refused connection; CLI did not resolve on PATH or in the standard per-user install location. No runtime/model was installed or downloaded. Genuine model output, quality, and saved generated-commentary restart behavior remain unverified; manual absence/mocked persistence are not substitutes.
+- Additional check gap: optional standalone E2E TypeScript checking lacks `@types/node`; no package was added. The existing app TypeScript gate passes. Carry forward the previous formatting/lint/install-default/semantic conflicts; no claim that they were fixed here.
+- Next: human starts/installs Ollama and loads `qwen2.5:3b`, then resume Phase 4 on fresh isolated data with real inference and a genuine-commentary restart round trip. Do not advance to final polish merely because manual mode passes.
+
+## Product improvement frontend - 2026-11-19
+
+- Approval: human explicitly approved Phase 3 after the backend report. Phase 4 is not yet approved.
+- Report: [Phase 3 frontend](reports/product-improvement-phase3-frontend.md).
+- Done: complete active collection/result/path pagination with non-advancing-page errors; bounded path-request batches; lazy saved-commentary GET per expanded result; local generation/retry states that preserve saved text; saved role/weight labels; node selection linked to details; vertical narrow-canvas layout and resize-aware fitting.
+- Preserved: existing theme, header/navigation, ripple background, backend/scoring/auth logic, dependencies, migrations, and original database. Backend files edited between phases were not overwritten.
+- Final verification: 19 frontend tests, 113 backend tests, TypeScript, ESLint, production build, and all six changed-file formatting checks passed. The final live Chrome suite passed both tests on fresh isolated SQLite state. The resize regression also passed three repeated runs after a timing-race fix.
+- Browser evidence: user-created three-component system, manually approved weights 0.8/0.75, severity 90, observed direct 57.6 and indirect 34.56; History survives refresh. Real AI-unavailable feedback was verified. No genuine model inference is claimed. Desktop/mobile screenshots were inspected; all three nodes are framed after resize and no page-level mobile overflow or uncaught page errors were observed.
+- Baseline still open: ordinary frontend formatting flags 18 untouched files (previously 24); historical initial-migration Ruff findings remain. No gate was disabled or configuration weakened.
+- Isolation: only new databases under `backend/.venv/` were migrated; no original database reset, seeding, or migration. An early repeated run failed the empty-workspace guard; fresh files were used rather than weakening that guard or resetting records.
+- Preview running: `http://127.0.0.1:5193`, loopback API `http://127.0.0.1:8033`, isolated `.venv/phase3-browser-20261119-4.sqlite3`. This preview contains acceptance-test records only.
+- Next after approval: Phase 4 genuine Ollama recommendation/approval/commentary-history integration and restart checks. Remaining installation defaults (Compose demo seeding), semantic brief conflicts, and final polish are still open. No remote Git, CI/CD, cloud action, or commit was performed.
+
+## Product improvement backend - 2026-11-19
+
+- Approval: human explicitly approved Phase 2 after the audit report. Phase 3 is not yet approved.
+- Report: [Phase 2 backend](reports/product-improvement-phase2-backend.md).
+- Done: additive `f64d81a2c039` commentary migration/model; audited append-only AI commentary with offline retrieval; workspace-aware JSON assessment inputs; stale-context approval checks; preserved effective weights during reassessment/rejection; optional descriptive/assessment context in canonical snapshots with legacy replay support.
+- Verification: 113 backend tests and 11 frontend tests passed; TypeScript/Vite production build passed; Ruff application/tests/scripts/new-migration lint passed; full backend formatting passed (28 files). OpenAPI was regenerated and its contract test passed.
+- Persistence evidence: temporary SQLite migration upgrade/downgrade/re-upgrade and schema drift checks passed; commentary survived connection-pool disposal; failed generation preserved saved content; composite result FK rejected a cross-tenant record. PostgreSQL offline DDL generation passed, not live PostgreSQL testing.
+- Existing databases were not migrated or seeded. Back up existing development data and apply `alembic upgrade head` before running the updated backend. No frontend or previous migration was edited, and no new dependency or Git commit was created.
+- Blockers: Ollama remains unreachable at `127.0.0.1:11434`. No current genuine inference, live browser acceptance, database-process restart, or PostgreSQL concurrency result is claimed.
+- Remaining baseline failures: full-scope Ruff still has the initial migration's 12 findings; frontend Prettier still has the audit's 24 checkout line-ending findings. No gate was weakened.
+- Next after explicit approval: Phase 3 frontend pagination, saved-commentary retrieval, and clearer graph roles while preserving original blue/ripple identity. Compose demo-seeding defaults and full live integration remain open.
+- Unchanged decisions awaiting human resolution: current-time versus event-start `as_of`, exclusive versus inclusive expiry, and zero-weight edge handling. No silent scoring/authorization change was made.
+
+## Product improvement audit - 2026-11-19
+
+- Report: [Phase 1 audit](reports/product-improvement-phase1-audit.md).
+- Done: inspected active frontend/API/AI/engine/persistence/test paths; restored existing locked dependencies. Initial working tree was clean on `project`.
+- Verification: 95 backend tests and 11 frontend tests passed; frontend TypeScript, ESLint, production build, and backend format checks passed. Backend runtime was Python 3.14.7.
+- Open quality failures: ordinary Prettier check flags 24 files; diagnostic `--end-of-line auto` passes, isolating checkout line-ending differences. Full Ruff scope flags 12 existing findings in the initial migration. Neither failure was suppressed.
+- Open product gaps: first-page-only collection/path loading; generated AI commentary not persisted; snapshots omit assessment/context details; Compose enables demo seeding; assessment context/freshness lifecycle needs strengthening; active analysis graph lacks explicit direct/indirect role styling.
+- Blockers/unverified: Ollama at `127.0.0.1:11434` refused connection. No current live AI/browser journey, database restart, PostgreSQL verification, or visual review was performed.
+- Decisions requiring review: live `as_of` defaults to now rather than event start; expiry is exclusive rather than inclusive; live analysis disables zero-weight edges. Do not silently change these existing brief/code conflicts.
+- Next: human reviews the audit and explicitly approves Phase 2 backend work. Preserve blue styling, ripple background, authorization, working features, immutable history, and deterministic scoring. CI/CD is not the current priority.
+- Progress discipline: later sections retain historical status/evidence; this dated section is the current improvement handoff. No new phase is authorized by the audit report itself.
 
 ## Done
 

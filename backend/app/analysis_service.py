@@ -26,6 +26,7 @@ from app.engine import (
     ImpactPath as EnginePath,
 )
 from app.models import (
+    AnalysisExplanation,
     AuditLog,
     Dependency,
     Entity,
@@ -35,12 +36,74 @@ from app.models import (
     ImpactResult,
     ImpactRun,
     OperationalEvent,
+    Organization,
     OrganizationMember,
 )
 from app.schemas import AnalysisRunCreate
 from app.services import get_event_for_member
 
 logger = logging.getLogger(__name__)
+
+
+def get_analysis_explanation_for_member(
+    session: Session,
+    membership: OrganizationMember,
+    run_id: UUID,
+    entity_id: UUID,
+) -> AnalysisExplanation:
+    get_impact_result_for_member(session, membership, run_id, entity_id)
+    explanation = session.scalar(
+        select(AnalysisExplanation)
+        .where(
+            AnalysisExplanation.organization_id == membership.organization_id,
+            AnalysisExplanation.run_id == run_id,
+            AnalysisExplanation.entity_id == entity_id,
+        )
+        .order_by(AnalysisExplanation.created_at.desc(), AnalysisExplanation.id.desc())
+        .limit(1)
+    )
+    if explanation is None:
+        raise HTTPException(404, "No AI commentary has been saved for this result.")
+    return explanation
+
+
+def save_analysis_explanation_for_member(
+    session: Session,
+    membership: OrganizationMember,
+    run_id: UUID,
+    entity_id: UUID,
+    *,
+    model: str,
+    explanation: str,
+    context: dict[str, object],
+    request_id: str | None,
+) -> AnalysisExplanation:
+    run = get_analysis_run_for_member(session, membership, run_id)
+    get_impact_result_for_member(session, membership, run_id, entity_id)
+    record = AnalysisExplanation(
+        organization_id=membership.organization_id,
+        run_id=run_id,
+        entity_id=entity_id,
+        model=model,
+        explanation=explanation,
+        context=context,
+        input_hash=run.input_hash,
+        created_by_user_id=membership.user_id,
+    )
+    session.add(record)
+    session.flush()
+    session.add(
+        AuditLog(
+            organization_id=membership.organization_id,
+            actor_user_id=membership.user_id,
+            action="analysis_explanation.created",
+            resource_type="analysis_explanation",
+            resource_id=record.id,
+            request_id=request_id,
+            summary={"run_id": str(run_id), "entity_id": str(entity_id)},
+        )
+    )
+    return record
 
 
 def _utc_datetime(value: datetime) -> datetime:
@@ -81,6 +144,7 @@ def _analysis_input(
     dependencies: Sequence[Dependency],
     membership: OrganizationMember,
     payload: AnalysisRunCreate,
+    workspace: Organization,
 ) -> AnalysisInput:
     trigger_snapshots = tuple(
         EventTriggerSnapshot(
@@ -138,6 +202,24 @@ def _analysis_input(
         max_nodes_per_run=payload.max_nodes_per_run,
         include_trigger_entities=payload.include_trigger_entities,
         algorithm_version=ALGORITHM_VERSION,
+        context={
+            "workspace": {"name": workspace.name, "description": workspace.description},
+            "event": {
+                "description": event.description,
+                "duration_minutes": event.duration_minutes,
+            },
+            "entities": [
+                {
+                    "id": str(item.id),
+                    "description": item.description,
+                    "attributes": item.attributes,
+                }
+                for item in entities
+            ],
+            "dependencies": [
+                {"id": str(item.id), "assessment": item.assessment} for item in dependencies
+            ],
+        },
     )
 
 
@@ -336,7 +418,12 @@ def create_analysis_run_for_member(
     )
     as_of = payload.as_of or datetime.now(UTC)
     payload = payload.model_copy(update={"as_of": as_of})
-    analysis = _analysis_input(event, triggers, entities, dependencies, membership, payload)
+    workspace = session.get(Organization, membership.organization_id)
+    if workspace is None:
+        raise HTTPException(404, "Workspace was not found.")
+    analysis = _analysis_input(
+        event, triggers, entities, dependencies, membership, payload, workspace
+    )
     try:
         prepare_analysis_input(analysis)
     except EngineInputError as error:
