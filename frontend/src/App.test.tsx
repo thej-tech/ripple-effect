@@ -1,8 +1,4 @@
-
-﻿import { render, screen, waitFor, within } from "@testing-library/react";
-
-﻿import { render, screen, within } from "@testing-library/react";
-
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -156,6 +152,49 @@ test("shows request errors and retries the workspace list", async () => {
   ).toBeVisible();
 });
 
+test("opens the scenario workspace from the primary navigation", async () => {
+  const user = userEvent.setup();
+  api.listWorkspaces.mockResolvedValue([]);
+  mockOverview();
+  api.saveWorkspace.mockResolvedValue({
+    id: "one",
+    name: "Example",
+    description: "",
+  });
+  for (const method of [
+    api.listEntities,
+    api.listDependencies,
+    api.listEvents,
+    api.listRuns,
+    api.listScenarios,
+  ]) {
+    method.mockResolvedValue({ items: [], total: 0, limit: 100, offset: 0 });
+  }
+  render(<App />);
+  await screen.findByText(
+    "Create a system to start mapping your dependencies.",
+  );
+  await user.click(screen.getByRole("button", { name: "Create Workspace" }));
+  await user.type(screen.getByLabelText("Name"), "Example");
+  await user.click(screen.getByRole("button", { name: "Save workspace" }));
+  await screen.findByRole("button", { name: "Open System Builder" });
+
+  await user.click(
+    within(screen.getByRole("navigation")).getByRole("button", {
+      name: "Scenarios",
+    }),
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "Create a scenario" }),
+  ).toBeVisible();
+  expect(
+    screen.getByText(
+      "Scenario estimates are not predictions or recommendations.",
+    ),
+  ).toBeVisible();
+  expect(api.listScenarios).toHaveBeenCalledTimes(1);
+});
 
 test("arranges unsaved builder components left to right along dependencies", async () => {
   const user = userEvent.setup();
@@ -229,22 +268,10 @@ function prepareHistory() {
     { id: "one", name: "User system", description: "" },
   ]);
   mockOverview();
-
-test("opens the scenario workspace from the primary navigation", async () => {
-  const user = userEvent.setup();
-  api.listWorkspaces.mockResolvedValue([]);
-  mockOverview();
-  api.saveWorkspace.mockResolvedValue({
-    id: "one",
-    name: "Example",
-    description: "",
-  });
-
   for (const method of [
     api.listEntities,
     api.listDependencies,
     api.listEvents,
-
   ]) {
     method.mockResolvedValue({ items: [], total: 0, limit: 100, offset: 0 });
   }
@@ -458,35 +485,4 @@ test("distinguishes saved trigger, direct and indirect nodes in depth columns", 
   expect(indirect).toHaveTextContent("57.6");
   expect(Number(source.dataset.x)).toBeLessThan(Number(direct.dataset.x));
   expect(Number(direct.dataset.x)).toBeLessThan(Number(indirect.dataset.x));
-
-    api.listRuns,
-    api.listScenarios,
-  ]) {
-    method.mockResolvedValue({ items: [], total: 0 });
-  }
-  render(<App />);
-  await screen.findByText(
-    "Create a system to start mapping your dependencies.",
-  );
-  await user.click(screen.getByRole("button", { name: "Create Workspace" }));
-  await user.type(screen.getByLabelText("Name"), "Example");
-  await user.click(screen.getByRole("button", { name: "Save workspace" }));
-  await screen.findByRole("button", { name: "Open System Builder" });
-
-  await user.click(
-    within(screen.getByRole("navigation")).getByRole("button", {
-      name: "Scenarios",
-    }),
-  );
-
-  expect(
-    await screen.findByRole("heading", { name: "Create a scenario" }),
-  ).toBeVisible();
-  expect(
-    screen.getByText(
-      "Scenario estimates are not predictions or recommendations.",
-    ),
-  ).toBeVisible();
-  expect(api.listScenarios).toHaveBeenCalledTimes(1);
-
 });
