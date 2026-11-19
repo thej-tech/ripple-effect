@@ -46,6 +46,9 @@ services:
     image: ripple-effect-web:local
     build:
       context: ./frontend
+    environment:
+      # Synthetic seeded "North Campus Demo" administrator (development only).
+      RIPPLE_LOCAL_USER_ID: ${RIPPLE_LOCAL_USER_ID:-40f3a390-3e0b-5bf4-bb3b-aad260f8120a}
     depends_on:
       api:
         condition: service_healthy

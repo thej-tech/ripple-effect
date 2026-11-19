@@ -19,7 +19,8 @@ COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 
 ENV API_UPSTREAM=api:8000 \
-    NGINX_ENVSUBST_FILTER="^API_UPSTREAM$"
+    RIPPLE_LOCAL_USER_ID="" \
+    NGINX_ENVSUBST_FILTER="^(API_UPSTREAM|RIPPLE_LOCAL_USER_ID)$"
 
 USER 101
 
