@@ -20,3 +20,4 @@ frontend/playwright-report/
 !.vscode/extensions.json
 infra/azure/*.local.parameters.json
 infra/azure/*.local.bicepparam
+*.sqlite3
