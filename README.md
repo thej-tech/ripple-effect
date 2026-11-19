@@ -89,7 +89,12 @@ This verifies the exact saved snapshot, hash, results, approved dependencies, Hi
 3. Drag **Database → Backend API** and **Backend API → Frontend Application**. For each arrow, save the relationship and request an AI assessment. Read the reasoning and approve the recommendation or enter a manual weight. Changes are saved as you go.
 4. In **Impact Analysis**, create **Database Outage**, select **Database**, set severity to **90**, and add context. Save the trigger and run the analysis.
 5. Expand the direct and indirect results. Follow the stored path and weights. Use **Explain with AI** to discuss uncertainty and potential mitigations.
+
 6. Open **History** and reopen **Database Outage**. Expand a result to load any saved AI commentary without generating it again. Refresh and reopen the run to demonstrate persistence. **Explain with AI** or **Regenerate commentary** explicitly requests new output; a failed regeneration leaves saved text visible.
+
+6. Open **Scenarios**. Choose the **Database Outage** run as the baseline and create a scenario. Add a mitigation intervention to **Backend API**, run the scenario, and compare it with the baseline. Scenario changes never update live records.
+7. Open **History** and reopen **Database Outage**. Refresh and open it again to demonstrate persistence.
+
 
 See [docs/progress.md](docs/progress.md) and the [final Phase 5 report](docs/reports/product-improvement-phase5-polish.md) for current verification and remaining work. Workspace collections and retained paths load all pages. System Builder arranges unsaved components left to right along dependencies, and the saved-run graph distinguishes propagation roles and switches to a vertical layout on narrow screens. Fresh installations, including Compose and the local Kubernetes manifest, start without demo workspaces unless `SEED_DEMO_DATA=true` is set deliberately.
 

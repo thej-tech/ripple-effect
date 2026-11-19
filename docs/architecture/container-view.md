@@ -21,6 +21,14 @@ applies migrations, optionally inserts idempotent demo data, and then launches
 Uvicorn. The web service waits for API readiness. The local auth adapter and
 demo seed are enabled only by this development Compose configuration.
 
+The browser does not send an identity. Like the Vite development proxy, Nginx
+sets `X-Local-User-ID` from the web service's `RIPPLE_LOCAL_USER_ID` variable.
+Compose defaults it to the synthetic seeded North Campus administrator. The
+image default is empty, which omits the header, so a client-supplied value is
+never forwarded. The Compose smoke script checks `/api/v1/workspaces` through
+Nginx to confirm the identity reaches the API. The Kubernetes manifest does not
+set this variable yet.
+
 The backend runtime uses a non-root user and installs locked runtime
 dependencies. The frontend is built with Node and served by the unprivileged
 Nginx image. Neither build context includes local environment files or SQLite

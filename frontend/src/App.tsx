@@ -15,6 +15,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import RippleBackground from "./RippleBackground";
+import ScenarioWorkspace from "./ScenarioWorkspace";
 import {
   ApiClient,
   collectPages,
@@ -34,6 +35,7 @@ const sections = [
   "Dashboard",
   "System Builder",
   "Impact Analysis",
+  "Scenarios",
   "History",
 ] as const;
 type Section = (typeof sections)[number];
@@ -1256,6 +1258,14 @@ function WorkspaceView({
               </section>
             )}
           </>
+        )}
+        {section === "Scenarios" && (
+          <ScenarioWorkspace
+            client={api}
+            runs={runs}
+            entities={entities}
+            dependencies={dependencies}
+          />
         )}
         {section === "History" && (
           <section className="content-card panel">
