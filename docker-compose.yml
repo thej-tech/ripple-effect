@@ -7,11 +7,27 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  ollama:
+    image: ollama/ollama:0.40.16
+    environment:
+      OLLAMA_NO_CLOUD: "1"
+    volumes:
+      - ollama-data:/root/.ollama
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
 
   api:
     image: ripple-effect-api:local
@@ -22,8 +38,12 @@ services:
       APP_ENV: development
       ENABLE_LOCAL_AUTH: "true"
       SEED_DEMO_DATA: "${SEED_DEMO_DATA:-false}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://ollama:11434}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen2.5:3b}"
     depends_on:
       db:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
@@ -47,6 +67,7 @@ services:
     build:
       context: ./frontend
     environment:
+      API_UPSTREAM_RESOLVE: resolve
       # Synthetic seeded "North Campus Demo" administrator (development only).
       RIPPLE_LOCAL_USER_ID: ${RIPPLE_LOCAL_USER_ID:-40f3a390-3e0b-5bf4-bb3b-aad260f8120a}
     depends_on:
@@ -65,3 +86,4 @@ services:
 
 volumes:
   postgres-data:
+  ollama-data:
